@@ -11,6 +11,7 @@ from onnxruntime.quantization import QuantType, quantize_dynamic
 from vocos import Vocos
 
 from models import MixerTTSModel
+from models.hifigan import load_hifigan
 from models.symbols import symbols
 
 
@@ -104,6 +105,25 @@ class MixerTTSVocosOnnx(torch.nn.Module):
         return self.istft_real(spec)
 
 
+class MixerTTSHiFiGANOnnx(torch.nn.Module):
+    def __init__(self, acoustic: MixerTTSOnnx, hifigan: torch.nn.Module) -> None:
+        super().__init__()
+        self.acoustic = acoustic
+        self.hifigan = hifigan
+
+    def forward(
+        self,
+        token_ids: torch.LongTensor,
+        pace: torch.Tensor,
+        speaker: torch.Tensor,
+        emotion: torch.Tensor,
+        pitch_mul: torch.Tensor,
+        pitch_add: torch.Tensor,
+    ) -> torch.Tensor:
+        mel = self.acoustic(token_ids, pace, speaker, emotion, pitch_mul, pitch_add)
+        return self.hifigan(mel)[:, 0]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", default=str(ROOT / "pretrained" / "mixer_lj_80.pth"))
@@ -111,7 +131,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--opset", type=int, default=17)
     parser.add_argument("--with-vocoder", action="store_true")
+    parser.add_argument("--vocoder-kind", choices=["vocos", "hifigan"], default="vocos")
     parser.add_argument("--vocoder", default="BSC-LT/vocos-mel-22khz")
+    parser.add_argument("--hifigan-config", default=str(ROOT / "pretrained" / "hifigan-official" / "LJ_FT_T2_V1" / "config.json"))
+    parser.add_argument("--hifigan-checkpoint", default=str(ROOT / "pretrained" / "hifigan-official" / "LJ_FT_T2_V1" / "generator_v1"))
     parser.add_argument("--no-int8", action="store_true", help="Export fp32 ONNX instead of default int8 dynamic quantization")
     return parser.parse_args()
 
@@ -153,9 +176,16 @@ def main() -> None:
 
     acoustic = MixerTTSOnnx(model).to(args.device).eval()
     if args.with_vocoder:
-        vocoder = Vocos.from_pretrained(args.vocoder).to(args.device).eval()
-        materialize_module_tensors(vocoder)
-        wrapper = MixerTTSVocosOnnx(acoustic, vocoder).to(args.device).eval()
+        if args.vocoder_kind == "vocos":
+            vocoder = Vocos.from_pretrained(args.vocoder).to(args.device).eval()
+            materialize_module_tensors(vocoder)
+            wrapper = MixerTTSVocosOnnx(acoustic, vocoder).to(args.device).eval()
+            vocoder_name = args.vocoder
+        else:
+            hifigan = load_hifigan(args.hifigan_config, args.hifigan_checkpoint, args.device)
+            materialize_module_tensors(hifigan)
+            wrapper = MixerTTSHiFiGANOnnx(acoustic, hifigan).to(args.device).eval()
+            vocoder_name = f"hifigan:{Path(args.hifigan_checkpoint).parent.name}/{Path(args.hifigan_checkpoint).name}"
         output_names = ["audio"]
         dynamic_axes = {
             "token_ids": {0: "batch", 1: "token"},
@@ -203,7 +233,8 @@ def main() -> None:
         "sample_rate": "22050",
         "mel_channels": "80",
         "output_type": output_type,
-        "vocoder": args.vocoder if args.with_vocoder else "",
+        "vocoder": vocoder_name if args.with_vocoder else "",
+        "vocoder_kind": args.vocoder_kind if args.with_vocoder else "",
         "symbols": "".join(symbols),
         "phonemizer": "espeak",
         "phonemizer_language": "en-us",
