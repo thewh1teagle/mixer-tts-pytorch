@@ -1,0 +1,21 @@
+restore_model: ./pretrained/mixer_lj_80.pth
+
+log_dir: logs/synthetic-ft-80
+checkpoint_dir: checkpoints/synthetic-ft-80
+
+train_audio_dir: ./data/synthetic-multilingual-speech-ft/wav
+train_labels: ./data/synthetic-multilingual-speech-ft/metadata.csv
+pitch_dir: ./data/synthetic-multilingual-speech-ft/pitch
+
+dim: 80
+learning_rate: 1.0e-4
+score_loss: 4.0
+fmatch_loss: 1.0
+
+eval_fraction: 0.02
+split_seed: 1337
+eval_interval: 1000
+save_interval: 1000
+print_interval: 10
+num_workers: 2
+train_gan: true

@@ -1,6 +1,6 @@
 # %%
 import torch
-from vocoder.vocos.pretrained import Vocos
+from vocos import Vocos
 from models import MixerTTSModel
 from utils.phonemizer import text_to_ids_en
 import sounddevice as sd
@@ -34,7 +34,7 @@ text = "Hello World!"
 token_ids = text_to_ids_en(text)
 mel_spec = mel_model.infer(text=token_ids[None], 
                            text_len=torch.LongTensor([len(token_ids)]))
-wave = vocos.decode_mel(mel_spec.transpose(1,2), denoise=0.003)
+wave = vocos.decode(mel_spec.transpose(1,2))
 wave = wave / wave.abs().max()
 
 sd.play(wave[0], sample_rate)

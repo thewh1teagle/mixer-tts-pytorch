@@ -1,6 +1,12 @@
 # %%
 import phonemizer
+import espeakng_loader
+from phonemizer.backend.espeak.wrapper import EspeakWrapper
+
 from utils import read_lines_from_file, write_lines_to_file
+
+EspeakWrapper.set_library(espeakng_loader.get_library_path())
+EspeakWrapper.set_data_path(espeakng_loader.get_data_path())
 
 phonemizer_en = phonemizer.backend.EspeakBackend(language='en-us', preserve_punctuation=True, with_stress=True)
 

@@ -267,7 +267,7 @@ ax2.imshow(mel_padded[idx].cpu(), origin='lower', aspect='auto')
 # %%
 
 import sounddevice as sd
-from vocoder.vocos.pretrained import Vocos
+from vocos import Vocos
 from utils.phonemizer import text_to_ids_en
 
 
@@ -299,7 +299,7 @@ with torch.inference_mode():
              pace=1
     ).cpu()
 
-wave = vocos.decode_mel(mel_spec.transpose(1,2), denoise=0.003)
+wave = vocos.decode(mel_spec.transpose(1,2))
 wave = wave / wave.abs().max()
 
 sd.play(0.95*wave[0], sample_rate)

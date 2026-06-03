@@ -1,5 +1,6 @@
 # %%
 import pathlib
+import re
 import gdown
 
 # %%
@@ -28,6 +29,13 @@ FILES_DICT = {
 
 root_dir = pathlib.Path(__file__).parent
 
+
+def google_drive_id(url: str) -> str:
+    match = re.search(r"/d/([^/]+)", url)
+    if not match:
+        raise ValueError(f"Could not parse Google Drive file id from URL: {url}")
+    return match.group(1)
+
 for file_dict in FILES_DICT.values():
     file_path = root_dir.joinpath(file_dict['path'])
 
@@ -38,5 +46,7 @@ for file_dict in FILES_DICT.values():
         print(file_dict['path'], "already exists!")
     elif file_dict.get('download', True):
         print("Downloading ", file_dict['path'], "...")
-        output_filepath = gdown.download(file_dict['url'], output=file_path.as_posix(), fuzzy=True)
-
+        output_filepath = gdown.download(
+            id=google_drive_id(file_dict['url']),
+            output=file_path.as_posix(),
+        )

@@ -1,0 +1,47 @@
+[project]
+name = "mixer-tts-pytorch"
+version = "0.1.0"
+description = "PyTorch implementation of Mixer-TTS."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "einops",
+    "espeakng-loader>=0.2.4",
+    "gdown",
+    "huggingface-hub",
+    "librosa",
+    "matplotlib",
+    "numba",
+    "numpy",
+    "onnx",
+    "onnxruntime",
+    "onnxscript>=0.7.0",
+    "phonemizer-fork>=3.3.2",
+    "pyyaml",
+    "scipy",
+    "sounddevice",
+    "tensorboard",
+    "torch",
+    "torchaudio",
+    "torchcodec>=0.13.0",
+    "tqdm",
+    "transformers",
+    "vocos>=0.1.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["models*", "utils*"]
+namespaces = true
+
+[tool.uv.sources]
+vocos = { git = "https://github.com/langtech-bsc/vocos.git", rev = "matcha" }
+
+[tool.uv.workspace]
+members = [
+    "mixer-tts-onnx",
+]

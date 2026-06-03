@@ -30,6 +30,8 @@ class LJDataset(Dataset):
                  sr_target:int=22050,
                  rms_db:float=-27,
                  f_cutoff:float=60, 
+                 f0_mean:float=211.37922361962185,
+                 f0_std:float=53.725665480075286,
                  ):
         
         """
@@ -45,6 +47,8 @@ class LJDataset(Dataset):
         self.sr_target = sr_target
         self.rms_db = rms_db
         self.f_cutoff = f_cutoff
+        self.f0_mean = f0_mean
+        self.f0_std = f0_std
         
         self.betabinomial_interpolator = BetaBinomialInterpolator()
         
@@ -86,7 +90,7 @@ class LJDataset(Dataset):
 
         pitch_filepath = os.path.join(self.pitch_dir, audio_id) + '.wav.pt'
         pitch_mel = torch.load(pitch_filepath)
-        pitch_mel = normalize_pitch(pitch_mel)[None]
+        pitch_mel = normalize_pitch(pitch_mel, self.f0_mean, self.f0_std)[None]
         
         energy = torch.norm(mel_log.float(), dim=0, p=2)
         attn_prior = torch.from_numpy(
@@ -106,6 +110,8 @@ class DynBatchDataset(LJDataset):
                  sr_target:int=22050,
                  rms_db:float=-27,
                  f_cutoff:float=60, 
+                 f0_mean:float=211.37922361962185,
+                 f0_std:float=53.725665480075286,
                  ):
         super().__init__(
             audio_dir=audio_dir, 
@@ -113,7 +119,9 @@ class DynBatchDataset(LJDataset):
             textfile_path=textfile_path,  
             sr_target=sr_target,
             rms_db=rms_db,
-            f_cutoff=f_cutoff,            
+            f_cutoff=f_cutoff,
+            f0_mean=f0_mean,
+            f0_std=f0_std,
         )
         
         self.max_id_lens = [0, 50, 100, 160, 210, 300, 5000]
@@ -150,4 +158,3 @@ class DynBatchDataset(LJDataset):
         batch = [super(DynBatchDataset, self).__getitem__(idx)
                  for idx in self.id_batches[idx]]
         return batch
-
