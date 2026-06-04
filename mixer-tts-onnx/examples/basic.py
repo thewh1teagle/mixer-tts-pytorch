@@ -1,3 +1,14 @@
+"""
+Basic English Mixer-TTS ONNX example.
+
+Setup:
+    cd mixer-tts-onnx
+    uv run --package mixer-tts-onnx examples/basic.py
+
+The example expects an embedded-vocoder ONNX model at:
+    ../checkpoints/onnx/mixer_lj_80_vocos.onnx
+"""
+
 from pathlib import Path
 
 from mixer_tts_onnx import MixerTTS
