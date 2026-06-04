@@ -16,6 +16,10 @@ from models.symbols import symbols
 
 
 ROOT = Path(__file__).resolve().parent
+ARABIC_IPA_REPLACEMENTS = {
+    "d͡ʒ": "ʤ",
+    "t͡ʃ": "ʧ",
+}
 
 
 class MixerTTSOnnx(torch.nn.Module):
@@ -238,6 +242,9 @@ def main() -> None:
         "symbols": "".join(symbols),
         "phonemizer": "espeak",
         "phonemizer_language": "en-us",
+        "arabic_phonemizer": "phoonnx",
+        "arabic_phonemizer_alphabet": "IPA",
+        "arabic_ipa_replacements_json": json.dumps(ARABIC_IPA_REPLACEMENTS, ensure_ascii=False),
         "quantization": "fp32" if args.no_int8 else "int8_dynamic",
         "inputs_json": json.dumps(
             {

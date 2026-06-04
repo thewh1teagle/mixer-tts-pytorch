@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,7 @@ import onnxruntime as ort
 import phonemizer
 import soundfile as sf
 from phonemizer.backend.espeak.wrapper import EspeakWrapper
+
 
 def _metadata(path: str | Path) -> dict[str, str]:
     model = onnx.load(str(path), load_external_data=False)
@@ -31,18 +33,18 @@ class MixerTTS:
         if not providers:
             providers = ["CPUExecutionProvider"]
 
-        meta = _metadata(self.model_path)
-        symbols = meta.get("symbols")
+        self.metadata = _metadata(self.model_path)
+        symbols = self.metadata.get("symbols")
         if not symbols:
             raise ValueError(f"ONNX model has no 'symbols' metadata: {self.model_path}")
-        sample_rate = meta.get("sample_rate")
+        sample_rate = self.metadata.get("sample_rate")
         if sample_rate is None:
             raise ValueError(f"ONNX model has no 'sample_rate' metadata: {self.model_path}")
 
         self.symbols = list(symbols)
         self.symbols_to_id = {symbol: index for index, symbol in enumerate(self.symbols)}
         self.sample_rate = int(sample_rate)
-        self.output_type = meta.get("output_type", "mel")
+        self.output_type = self.metadata.get("output_type", "mel")
         if self.output_type != "audio":
             raise ValueError(f"Expected embedded-vocoder ONNX with output_type=audio: {self.model_path}")
         self.session = ort.InferenceSession(str(self.model_path), providers=providers)
@@ -50,13 +52,23 @@ class MixerTTS:
         EspeakWrapper.set_library(espeakng_loader.get_library_path())
         EspeakWrapper.set_data_path(espeakng_loader.get_data_path())
         self.phonemizer = phonemizer.backend.EspeakBackend(
-            language=meta.get("phonemizer_language", "en-us"),
+            language=self.metadata.get("phonemizer_language", "en-us"),
             preserve_punctuation=True,
             with_stress=True,
         )
+        replacements_json = self.metadata.get("arabic_ipa_replacements_json")
+        if replacements_json:
+            self.arabic_ipa_replacements = json.loads(replacements_json)
+        else:
+            self.arabic_ipa_replacements = {}
 
     def text_to_ipa(self, text: str) -> str:
         return self.phonemizer.phonemize([text])[0]
+
+    def normalize_arabic_ipa(self, ipa: str) -> str:
+        for source, target in self.arabic_ipa_replacements.items():
+            ipa = ipa.replace(source, target)
+        return ipa
 
     def text_to_ids(self, text: str, *, is_phonemes: bool = False) -> np.ndarray:
         ipa = text if is_phonemes else self.text_to_ipa(text)
