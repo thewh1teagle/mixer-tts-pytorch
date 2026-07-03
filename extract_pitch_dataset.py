@@ -1,9 +1,9 @@
 import argparse
 import os
-import sys
 from pathlib import Path
 
 import librosa
+import numpy as np
 import soundfile as sf
 import torch
 import torch.nn.functional as F
@@ -18,10 +18,7 @@ def parse_args():
     parser.add_argument("--metadata", required=True)
     parser.add_argument("--pitch-dir", required=True)
     parser.add_argument("--sample-rate", type=int, default=22050)
-    parser.add_argument("--rmvpe-root", default="../zero-tts")
-    parser.add_argument("--rmvpe-model", default=None)
-    parser.add_argument("--rmvpe-device", default="cuda" if torch.cuda.is_available() else "cpu")
-    parser.add_argument("--rmvpe-batch-size", type=int, default=32)
+    parser.add_argument("--rmvpe-model", required=True)
     parser.add_argument("--rmvpe-threshold", type=float, default=0.03)
     parser.add_argument("--overwrite", action="store_true")
     return parser.parse_args()
@@ -41,66 +38,39 @@ def fit_length(values, length):
     return F.interpolate(values[None, None], size=length, mode="linear", align_corners=False)[0, 0]
 
 
-def batched_rmvpe(audio_ids, audio_dir, pitch_dir, sample_rate, args):
-    zero_tts_root = Path(args.rmvpe_root).resolve()
-    sys.path.insert(0, zero_tts_root.as_posix())
-    from huggingface_hub import hf_hub_download
-    from src.acoustic.rmvpe import RMVPE, SAMPLE_RATE as RMVPE_SAMPLE_RATE
+def extract_rmvpe(audio_ids, audio_dir, pitch_dir, sample_rate, args):
+    from rmvpe_onnx import RMVPE
 
-    device = torch.device(args.rmvpe_device)
-    model_path = args.rmvpe_model or hf_hub_download("stylish-tts/pitch_extractor", "rmvpe.safetensors")
-    hop_length = RMVPE_SAMPLE_RATE // (sample_rate // 256)
-    rmvpe = RMVPE(model_path, device=device, hop_length=hop_length)
+    rmvpe = RMVPE(args.rmvpe_model)
 
-    pending_by_length = {}
+    total_count = 0
+    total_sum = 0.0
+    total_sumsq = 0.0
+    progress = tqdm(total=len(audio_ids), desc="extracting pitch (rmvpe-onnx)")
+
     for audio_id in audio_ids:
         pitch_path = pitch_dir / f"{audio_id}.wav.pt"
         if pitch_path.exists() and not args.overwrite:
             pitch_mel = torch.load(pitch_path, map_location="cpu")
-            voiced = pitch_mel[pitch_mel > 1].double()
-            pending_by_length.setdefault(None, []).append(
-                (audio_id, None, pitch_mel, voiced.numel(), voiced.sum().item(), voiced.square().sum().item())
+        else:
+            audio_path = audio_dir / f"{audio_id}.wav"
+            info = sf.info(audio_path)
+            wav, _ = librosa.load(audio_path, sr=sample_rate, mono=True)
+            f0 = rmvpe.extract(
+                np.asarray(wav, dtype=np.float32),
+                sample_rate=sample_rate,
+                threshold=args.rmvpe_threshold,
             )
-            continue
-        info = sf.info(audio_dir / f"{audio_id}.wav")
-        pending_by_length.setdefault(info.frames, []).append((audio_id, info.frames, None, 0, 0.0, 0.0))
+            pitch_mel = fit_length(torch.as_tensor(f0, dtype=torch.float32), mel_length(info.frames))
+            pitch_mel = torch.nan_to_num(pitch_mel, nan=0.0, posinf=0.0, neginf=0.0).clamp_min(0.0)
+            torch.save(pitch_mel, pitch_path)
 
-    existing = pending_by_length.pop(None, [])
-    total_count = sum(x[3] for x in existing)
-    total_sum = sum(x[4] for x in existing)
-    total_sumsq = sum(x[5] for x in existing)
+        voiced = pitch_mel[pitch_mel > 1].double()
+        total_count += voiced.numel()
+        total_sum += voiced.sum().item()
+        total_sumsq += voiced.square().sum().item()
+        progress.update(1)
 
-    progress = tqdm(total=len(audio_ids), desc=f"extracting pitch ({device} rmvpe)")
-    if existing:
-        progress.update(len(existing))
-
-    for frame_count in sorted(pending_by_length):
-        rows = pending_by_length[frame_count]
-        for start in range(0, len(rows), args.rmvpe_batch_size):
-            batch = rows[start:start + args.rmvpe_batch_size]
-            waves = []
-            for audio_id, _, *_ in batch:
-                wav, _ = librosa.load(audio_dir / f"{audio_id}.wav", sr=sample_rate, mono=True)
-                waves.append(torch.from_numpy(wav).float())
-            audio = torch.stack(waves)
-            with torch.inference_mode():
-                f0_batch = rmvpe.infer_from_audio_batch(
-                    audio,
-                    sample_rate=sample_rate,
-                    thred=args.rmvpe_threshold,
-                )
-            f0_batch = torch.as_tensor(f0_batch).float().cpu()
-            for row, (audio_id, _, *__) in enumerate(batch):
-                target_len = mel_length(frame_count)
-                pitch_mel = fit_length(f0_batch[row], target_len)
-                pitch_mel = torch.nan_to_num(pitch_mel, nan=0.0, posinf=0.0, neginf=0.0).clamp_min(0.0)
-                pitch_path = pitch_dir / f"{audio_id}.wav.pt"
-                torch.save(pitch_mel, pitch_path)
-                voiced = pitch_mel[pitch_mel > 1].double()
-                total_count += voiced.numel()
-                total_sum += voiced.sum().item()
-                total_sumsq += voiced.square().sum().item()
-            progress.update(len(batch))
     progress.close()
     return total_count, total_sum, total_sumsq
 
@@ -117,7 +87,7 @@ def main():
         if line.strip()
     ]
 
-    total_count, total_sum, total_sumsq = batched_rmvpe(
+    total_count, total_sum, total_sumsq = extract_rmvpe(
         audio_ids, audio_dir, pitch_dir, args.sample_rate, args
     )
 
